@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sieć neuronowa – aplikacja edukacyjna</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>🧠 Jak działa sieć neuronowa?</h1>
+      <p class="subtitle">
+        Rysuj znaki 32×32, ucz sieć i patrz, jak neurony przekazują sobie sygnały.
+      </p>
+    </header>
+
+    <!-- ============ EKRAN GŁÓWNY ============ -->
+    <section id="screen-home" class="screen active">
+      <div class="menu">
+        <button id="btn-generate" class="big-btn">✏️ Generuj dane treningowe</button>
+        <button id="btn-train" class="big-btn">🎓 Uczenie</button>
+        <button id="btn-recognize" class="big-btn">🔍 Rozpoznawanie</button>
+      </div>
+      <div id="home-stats" class="info-box"></div>
+      <div class="hint">
+        <b>Jak zacząć?</b> 1) Narysuj po kilka obrazków dla co najmniej dwóch różnych
+        znaków (np. „A” i „B”). 2) Uruchom uczenie. 3) Przejdź do rozpoznawania.
+      </div>
+    </section>
+
+    <!-- ============ EKRAN: GENEROWANIE DANYCH ============ -->
+    <section id="screen-generate" class="screen">
+      <h2>Generowanie danych treningowych</h2>
+      <div class="row">
+        <div>
+          <canvas id="editor-generate" width="384" height="384" class="editor"></canvas>
+          <p class="tiny">
+            Rysuj lewym przyciskiem myszy. Prawy przycisk lub Shift = gumka.
+          </p>
+        </div>
+        <div class="controls">
+          <label for="label-input">Co to jest (etykieta)?</label>
+          <input id="label-input" type="text" placeholder="np. A, serce, 7…" />
+          <button id="btn-save-sample" class="primary">✔ OK – zapisz obrazek</button>
+          <button id="btn-clear-editor">🧹 Wyczyść</button>
+          <p id="generate-status" class="status"></p>
+          <p class="tiny">
+            Dla każdego znaku narysuj wiele obrazków (im więcej i im bardziej różnorodne,
+            tym lepiej sieć się nauczy). Po zapisaniu rysunek się czyści.
+          </p>
+        </div>
+      </div>
+      <button class="btn-home">← Powrót do menu</button>
+    </section>
+
+    <!-- ============ EKRAN: UCZENIE ============ -->
+    <section id="screen-train" class="screen">
+      <h2>Uczenie sieci</h2>
+      <canvas id="viz-train" width="900" height="480" class="viz"></canvas>
+      <div class="controls-inline">
+        <button id="btn-start-training" class="primary">▶ Rozpocznij uczenie</button>
+        <button id="btn-stop-training">⏹ Zatrzymaj</button>
+        <span id="train-status" class="status"></span>
+      </div>
+      <div class="hint">
+        Linie to połączenia między neuronami. <b>Ciepłe</b> kolory = wartości dodatnie,
+        <b>zimne</b> = ujemne. W trakcie uczenia sieć wielokrotnie ogląda obrazki i
+        stopniowo zmienia wagi, aby coraz lepiej odgadywać etykiety.
+      </div>
+      <button class="btn-home">← Powrót do menu</button>
+    </section>
+
+    <!-- ============ EKRAN: ROZPOZNAWANIE ============ -->
+    <section id="screen-recognize" class="screen">
+      <h2>Rozpoznawanie</h2>
+      <div class="row">
+        <div>
+          <canvas id="editor-recognize" width="256" height="256" class="editor"></canvas>
+          <div class="controls-inline">
+            <button id="btn-recognize-run" class="primary">🔍 Rozpoznaj</button>
+            <button id="btn-clear-recognize">🧹 Wyczyść</button>
+          </div>
+          <p id="recognize-result" class="status big-status"></p>
+        </div>
+        <div>
+          <canvas id="viz-recognize" width="640" height="420" class="viz"></canvas>
+        </div>
+      </div>
+      <div class="hint">
+        Przed rozpoznaniem kolory linii pokazują <b>wagi</b> nauczonej sieci.
+        Po kliknięciu „Rozpoznaj” kolory pokazują <b>sygnał</b> płynący przez sieć,
+        a jasność kółek – jak mocno pobudzony jest dany neuron.
+      </div>
+      <button class="btn-home">← Powrót do menu</button>
+    </section>
+
+    <!-- Skrypty: kolejność ma znaczenie (najpierw rdzeń, potem aplikacja). -->
+    <script src="js/neuron.js"></script>
+    <script src="js/network.js"></script>
+    <script src="js/editor.js"></script>
+    <script src="js/visualizer.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
+
