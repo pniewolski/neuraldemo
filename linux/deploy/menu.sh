@@ -11,12 +11,15 @@ source "$DIR/lib.sh"
 set +e          # w menu nie przerywamy pracy po pierwszym niepowodzeniu
 require_root
 
+# clear wymaga poprawnie ustawionej zmiennej TERM; bez niej czyścimy ekran sekwencją ANSI
+czysc() { clear 2>/dev/null || printf '\033[2J\033[H'; }
+
 ROLE_FILE="$WORKDIR/rola"
 mkdir -p "$WORKDIR"
 
 # ----------------------------------------------------------------- rola serwera
 wybierz_role() {
-  clear
+  czysc
   printf '%s%s%s\n\n' "$C_HEAD" "Na jakim serwerze pracujesz?" "$C_N"
   printf '  1) TESTOWY     – tu kompilujemy PHP i przygotowujemy paczkę\n'
   printf '  2) PRODUKCYJNY – tu instalujemy gotową paczkę z serwera testowego\n\n'
@@ -64,20 +67,26 @@ nastepny_krok() {
   echo 6
 }
 
-m() {  # pozycja menu: numer, opis, stan
-  local nr="$1" opis="$2" stan="$3"
-  local wsk="  "
-  [ "$nr" = "$NEXT" ] && wsk="${C_OK}->${C_N}"
-  printf ' %s %s) %-48s %s\n' "$wsk" "$nr" "$opis" "$stan"
+# pozycja menu: numer, znacznik stanu (tak/nie/puste), opis
+# Znacznik jest czysto ASCII i ma stałą szerokość – dzięki temu kolumny się nie rozjeżdżają
+# niezależnie od polskich znaków w opisie (printf liczy bajty, a nie znaki).
+m() {
+  local nr="$1" stan="$2" opis="$3"
+  local wsk="   " zn
+  [ "$nr" = "$NEXT" ] && wsk="${C_OK}-->${C_N}"
+  case "$stan" in
+    tak) zn="${C_OK}[ok]${C_N}" ;;
+    nie) zn="${C_WARN}[  ]${C_N}" ;;
+    *)   zn="    " ;;
+  esac
+  printf ' %s %s) %s %s\n' "$wsk" "$nr" "$zn" "$opis"
 }
-
-znacznik() { [ "$1" = "tak" ] && printf '%s[zrobione]%s' "$C_OK" "$C_N" || printf '%s[do zrobienia]%s' "$C_WARN" "$C_N"; }
 
 # ----------------------------------------------------------------- ekran
 ekran() {
   zbadaj_stan
   NEXT=$(nastepny_krok)
-  clear
+  czysc
   printf '%s===========================================================================%s\n' "$C_HEAD" "$C_N"
   printf '%s  Wdrożenie PHP 7.4 z łatką CVE-2026-109618 / CVE-2026-109619%s\n' "$C_HEAD" "$C_N"
   printf '%s===========================================================================%s\n' "$C_HEAD" "$C_N"
@@ -91,26 +100,35 @@ ekran() {
   esac
   printf '  PHP 7.2 CLI : %s\n' "${ST_PHP72:-brak}"
   printf '  PHP 7.4     : %s   moduł Apache: %s   php.ini: %s\n' "${ST_PHP74:-niezainstalowane}" "$ST_MOD74" "$ST_INI74"
-  [ "$ROLE" = "test" ] && printf '  Paczka      : %s\n' "$ST_PKG"
+  if [ "$ROLE" = "test" ]; then
+    printf '  Paczka      : %s\n' "$ST_PKG"
+  else
+    printf '  Paczka      : %s\n' "$([ -f "$PKG" ] && echo "$ST_PKG" || echo 'BRAK – skopiuj z serwera testowego')"
+  fi
   printf '  Repozytoria : %s\n' "$ST_YUM"
   printf '%s---------------------------------------------------------------------------%s\n' "$C_HEAD" "$C_N"
-  printf '  %sStrzałka -> wskazuje zalecany następny krok%s\n\n' "$C_OK" "$C_N"
+  printf '  %s-->%s zalecany następny krok      %s[ok]%s zrobione      %s[  ]%s do zrobienia\n\n' \
+         "$C_OK" "$C_N" "$C_OK" "$C_N" "$C_WARN" "$C_N"
 
-  m 1 "Inwentaryzacja i kopia zapasowa (nic nie zmienia)" "$(znacznik "$ST_INWENT")"
-  m 2 "Naprawa repozytoriów yum (vault)"                  "$([ "$ST_YUM" = OK ] && znacznik tak || znacznik nie)"
+  m 1 "$ST_INWENT" "Inwentaryzacja i kopia zapasowa (nic nie zmienia)"
+  m 2 "$([ "$ST_YUM" = OK ] && echo tak || echo nie)" "Naprawa repozytoriów yum (vault)"
   if [ "$ROLE" = "test" ]; then
-    m 3 "Kompilacja PHP 7.4 + testy + paczka  (~15 min)"  "$([ -n "$ST_PHP74" ] && znacznik tak || znacznik nie)"
+    m 3 "$([ -n "$ST_PHP74" ] && echo tak || echo nie)" "Kompilacja PHP 7.4 + testy + paczka   (~15 min)"
   else
-    m 3 "Instalacja paczki z serwera testowego"           "$([ -n "$ST_PHP74" ] && znacznik tak || znacznik nie)"
+    m 3 "$([ -n "$ST_PHP74" ] && echo tak || echo nie)" "Instalacja paczki z serwera testowego"
   fi
-  m 4 "Konfiguracja php.ini dla PHP 7.4"                  "$(znacznik "$ST_INI74")"
-  m 5 "PRZEŁĄCZ Apache na PHP 7.4  (restart!)"            "$([ "$ST_APACHE_PHP" = 74 ] && znacznik tak || znacznik nie)"
-  m 6 "Weryfikacja (nic nie zmienia)"                     ""
+  m 4 "$ST_INI74" "Konfiguracja php.ini dla PHP 7.4"
+  m 5 "$([ "$ST_APACHE_PHP" = 74 ] && echo tak || echo nie)" "PRZEŁĄCZ Apache na PHP 7.4   (restart Apache!)"
+  m 6 "" "Weryfikacja (nic nie zmienia)"
   printf '\n'
-  printf '    7) Powrót do PHP 7.2 (rollback)\n'
-  printf '    8) Podgląd logów i plików pomocniczych\n'
-  printf '    9) Zmień rolę serwera (teraz: %s)\n' "$ROLE"
-  printf '    0) Wyjście\n\n'
+  printf '         7) Powrót do PHP 7.2 (rollback)\n'
+  printf '         8) Podgląd logów i plików pomocniczych\n'
+  printf '         9) Zmień rolę serwera (teraz: %s)\n' "$ROLE"
+  printf '\n'
+  printf '         p) CZY SERWER JEST PODATNY? (sprawdzenie, nic nie zmienia)\n'
+  printf '         d) Diagnoza połączenia HTTP (gdy test HTTP zawodzi)\n'
+  printf '         t) Wyjaśnij nieudany test z wbudowanym serwerem HTTP\n'
+  printf '         0) Wyjście\n\n'
 }
 
 pauza() { printf '\n'; read -r -p "Naciśnij Enter, aby wrócić do menu... " _; }
@@ -121,14 +139,23 @@ uruchom() {
   bash "$DIR/$skrypt"
   local rc=$?
   printf '\n'
-  [ $rc -eq 0 ] && ok "Zakończono poprawnie: $skrypt" || err "Zakończono błędem ($rc): $skrypt"
+  # 60-czy-podatny.sh uzywa kodu wyjscia jako werdyktu, a nie jako bledu
+  if [ "$skrypt" = "60-czy-podatny.sh" ]; then
+    case $rc in
+      0) ok "Serwer nie jest podatny" ;;
+      1) err "Serwer JEST podatny albo wymaga restartu Apache" ;;
+      *) warn "Nie ustalono stanu" ;;
+    esac
+  else
+    [ $rc -eq 0 ] && ok "Zakończono poprawnie: $skrypt" || err "Zakończono błędem ($rc): $skrypt"
+  fi
   pauza
 }
 
 # ----------------------------------------------------------------- podmenu: logi
 menu_logi() {
   while true; do
-    clear
+    czysc
     printf '%s== Logi i pliki pomocnicze%s\n\n' "$C_HEAD" "$C_N"
     printf '  Katalog roboczy: %s\n\n' "$WORKDIR"
     printf '    1) Ostatni log skryptu wdrożeniowego\n'
@@ -210,7 +237,10 @@ while true; do
        case "$a" in [tTyY]*) uruchom 90-rollback-php72.sh ;; *) ;; esac ;;
     8) menu_logi ;;
     9) wybierz_role && ROLE=$(cat "$ROLE_FILE") ;;
-    0) clear
+    p|P) uruchom 60-czy-podatny.sh ;;
+    d|D) uruchom 99-diagnoza-http.sh ;;
+    t|T) uruchom 61-sprawdz-test-serwera.sh ;;
+    0) czysc
        printf 'Koniec.\n\n'
        zbadaj_stan
        case "$ST_APACHE_PHP" in
@@ -222,4 +252,7 @@ while true; do
     *) ;;
   esac
 done
+
+
+
 

@@ -20,7 +20,8 @@ if test_wbudowanego_serwera /usr/local/src/php-mod/sapi/cli/php 8970; then
 else
   ok "poprawnie wykryto, ze serwer nie startuje (port zajety)"
 fi
-kill $BLOKER 2>/dev/null; wait $BLOKER 2>/dev/null
+kill $BLOKER 2>/dev/null || true
+wait $BLOKER 2>/dev/null || true
 
 head1 "C. Nieistniejaca binarka"
 if test_wbudowanego_serwera /nie/ma/takiego/php 8964; then
@@ -35,4 +36,5 @@ test_wbudowanego_serwera /usr/local/src/php-mod/sapi/cli/php 8964 >/dev/null 2>&
 E=$(date +%s)
 log "  czas: $((E-S)) s"
 exit 0
+
 

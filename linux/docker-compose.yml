@@ -1,0 +1,18 @@
+services:
+  centos7:
+    build:
+      context: ./docker
+    image: centos7-php-test
+    container_name: centos7-php
+    hostname: centos7-php
+    platform: linux/amd64
+    ports:
+      - "8080:80"
+    volumes:
+      - ./www:/var/www/html
+      - ./patches:/patches
+      - php-patched:/opt/php-7.4-patched
+
+volumes:
+  php-patched:
+

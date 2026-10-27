@@ -11,16 +11,24 @@ check() { if [ "$2" = "1" ]; then ok "$1"; else err "$1"; FAILED=$((FAILED+1)); 
 
 head1 "Moduł PHP w Apache"
 httpd -M 2>/dev/null | grep -i php | sed 's/^/  /'
-MODCONF=$(find_php_module_conf) && sed 's/^/  /' "$MODCONF"
+MODCONF=$(find_php_module_conf) && grep -i loadmodule "$MODCONF" | sed 's/^[[:space:]]*/  /'
 CUR=$(current_apache_php)
 log "Skonfigurowana wersja: $CUR"
+
+head1 "Połączenie z Apache"
+if auto_docroot; then
+  ok "Apache wykonuje PHP: $TEST_URL -> $DOCROOT"
+else
+  diagnoza_probe
+  err "Bez działającego testu HTTP nie da się zweryfikować wdrożenia."
+  exit 1
+fi
 
 head1 "Wersja PHP obsługująca żądania"
 INFO=$(php_probe '<?php echo PHP_VERSION,"|",PHP_SAPI,"|",php_ini_loaded_file();')
 log "  $INFO"
 case "$INFO" in
   7.4*) check "Apache używa PHP 7.4" 1 ;;
-  "")   check "Apache odpowiada na $TEST_URL" 0; err "Brak odpowiedzi – sprawdź TEST_URL w config.sh i /var/log/httpd/error_log" ;;
   *)    check "Apache używa PHP 7.4 (jest: ${INFO%%|*})" 0 ;;
 esac
 case "$INFO" in *apache2handler*) check "SAPI: apache2handler (mod_php)" 1 ;; *) check "SAPI: apache2handler" 0 ;; esac
@@ -29,24 +37,25 @@ case "$INFO" in *"$PHP_PREFIX/etc/php.ini"*) check "Wczytany php.ini: $PHP_PREFI
 
 head1 "Czy łatka jest aktywna"
 # max_multipart_body_parts istnieje wyłącznie w wersji z łatką
-MP=$(php_probe '<?php $v=ini_get("max_multipart_body_parts"); echo $v===false?"BRAK":$v;')
+MP=$(php_probe '<?php $v=ini_get("max_multipart_body_parts"); echo $v===false?"BRAK":$v;' || true)
 log "  max_multipart_body_parts = ${MP:-(brak odpowiedzi)}"
 case "$MP" in BRAK|"") check "Łatka CVE-2026-109618/109619 aktywna" 0 ;; *) check "Łatka CVE-2026-109618/109619 aktywna" 1 ;; esac
 
 head1 "Rozszerzenia: Apache 7.4 vs zapisany stan 7.2"
 REF="$WORKDIR/php72-modules-apache.txt"
 if [ -f "$REF" ]; then
-  NOW=$(mktemp); php_probe '<?php echo implode("\n", get_loaded_extensions()),"\n";' | sort -f > "$NOW"
+  NOW=$(mktemp)
+  php_probe '<?php echo implode("\n", get_loaded_extensions()),"\n";' | sort -f > "$NOW"
   if diff -i "$REF" "$NOW" > "$WORKDIR/ext-diff.txt"; then
     check "Rozszerzenia identyczne jak w PHP 7.2" 1
   else
     check "Rozszerzenia identyczne jak w PHP 7.2" 0
-    cat "$WORKDIR/ext-diff.txt" | sed 's/^/  /'
+    sed 's/^/  /' "$WORKDIR/ext-diff.txt"
     log "  (< brakuje w 7.4, > nadmiarowe w 7.4)"
   fi
   rm -f "$NOW"
 else
-  warn "Brak $REF – uruchom 01-inwentaryzacja.sh przed przełączeniem, żeby mieć punkt odniesienia"
+  warn "Brak $REF – uruchom inwentaryzację (pozycja 1) przed przełączeniem, żeby mieć punkt odniesienia"
 fi
 
 head1 "Test funkcjonalny: sesje, upload, zmienne żądania"
@@ -77,23 +86,46 @@ rm -f "$DOCROOT/_smoke_$$.php" /tmp/_up_$$.txt
 printf '%s\n' "$RES" | sed 's/^/  /'
 case "$RES" in *"WSZYSTKO OK"*) check "Test funkcjonalny" 1 ;; *) check "Test funkcjonalny" 0 ;; esac
 
-head1 "Błędy w logu Apache"
-SEG=$(tail -500 /var/log/httpd/error_log 2>/dev/null | grep -c 'Segmentation fault' || true)
-PHPERR=$(tail -500 /var/log/httpd/error_log 2>/dev/null | grep -ci 'php7\?:error\|Unable to load' || true)
-[ "${SEG:-0}" -eq 0 ] && check "Brak segfaultów w ostatnich 500 liniach logu" 1 \
-                      || { check "Brak segfaultów w ostatnich 500 liniach logu" 0
-                           tail -500 /var/log/httpd/error_log | grep 'Segmentation fault' | tail -3 | sed 's/^/  /'
-                           err "Segfaulty najczęściej oznaczają przeładowanie zamiast restartu – użyj: systemctl restart httpd"; }
-[ "${PHPERR:-0}" -eq 0 ] && ok "Brak błędów PHP w logu" \
-                         || { warn "Błędy PHP w logu ($PHPERR):"
-                              tail -500 /var/log/httpd/error_log | grep -i 'php7\?:error\|Unable to load' | tail -5 | sed 's/^/  /'; }
+head1 "Błędy w logu Apache od ostatniego startu"
+ELOG=/var/log/httpd/error_log
+# bierzemy pod uwagę tylko wpisy po ostatnim "resuming normal operations",
+# żeby nie zgłaszać błędów sprzed wdrożenia
+SINCE=$(mktemp)
+if [ -f "$ELOG" ]; then
+  awk '/resuming normal operations/ { buf=""; next } { buf = buf $0 "\n" } END { printf "%s", buf }' "$ELOG" > "$SINCE"
+  log "  (analizuję $(wc -l < "$SINCE") linii od ostatniego startu Apache)"
+else
+  warn "Brak pliku $ELOG"
+fi
+
+SEG=$(grep -c 'Segmentation fault' "$SINCE" 2>/dev/null || true)
+if [ "${SEG:-0}" -eq 0 ]; then
+  check "Brak segfaultów od ostatniego startu Apache" 1
+else
+  check "Brak segfaultów od ostatniego startu Apache" 0
+  grep 'Segmentation fault' "$SINCE" | tail -3 | sed 's/^/  /'
+  err "Segfaulty przy mod_php najczęściej oznaczają przeładowanie zamiast pełnego restartu."
+  err "Wykonaj: systemctl restart httpd   (nie reload, nie graceful)"
+fi
+
+PHPERR=$(grep -ci 'php7\?:error\|Unable to load' "$SINCE" 2>/dev/null || true)
+if [ "${PHPERR:-0}" -eq 0 ]; then
+  ok "Brak błędów PHP w logu"
+else
+  warn "Błędy PHP w logu od ostatniego startu ($PHPERR):"
+  grep -i 'php7\?:error\|Unable to load' "$SINCE" | tail -5 | sed 's/^/  /'
+fi
+rm -f "$SINCE"
 
 head1 "PHP w linii poleceń (cron, skrypty)"
-log "  php -v      -> $(php -v 2>/dev/null | head -1)"
-log "  $PHP_PREFIX/bin/php -v -> $("$PHP_PREFIX/bin/php" -v 2>/dev/null | head -1)"
-php -v 2>/dev/null | head -1 | grep -q '^PHP 7\.4' \
-  && ok "CLI używa PHP 7.4" \
-  || warn "CLI nadal używa PHP 7.2 – podatność dotyczy HTTP, ale rozważ przeniesienie crona (krok 10 w WDROZENIE.md)"
+CLI_SYS=$(php -v 2>/dev/null | head -1 || true)
+CLI_74=$("$PHP_PREFIX/bin/php" -v 2>/dev/null | head -1 || true)
+log "  php -v                        -> ${CLI_SYS:-(brak polecenia php)}"
+log "  $PHP_PREFIX/bin/php -v -> ${CLI_74:-(brak)}"
+case "$CLI_SYS" in
+  "PHP 7.4"*) ok "CLI używa PHP 7.4" ;;
+  *) warn "CLI nadal używa PHP 7.2 – podatność dotyczy HTTP, ale rozważ przeniesienie crona (krok 10 w WDROZENIE.md)" ;;
+esac
 
 head1 "Podsumowanie"
 if [ "$FAILED" -eq 0 ]; then
@@ -111,4 +143,6 @@ else
   log "W razie problemów cofnij zmianę: ./90-rollback-php72.sh"
   exit 1
 fi
+
+
 

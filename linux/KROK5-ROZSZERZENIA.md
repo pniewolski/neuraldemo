@@ -139,18 +139,19 @@ diff <(php -m | sort -f) <(/opt/php-7.4-patched/bin/php -m | sort -f)
 
 ---
 
-## 5.6 Paczka na produkcję (bez zmian)
+## 5.6 Paczka na produkcję
 
 ```bash
-tar czf /root/php-7.4-patched-centos7.tgz -C /opt php-7.4-patched
+tar czf /root/php-7.4-patched-centos7.tgz \
+    -C / opt/php-7.4-patched usr/lib64/httpd/modules/libphp74-patched.so
 sha256sum /root/php-7.4-patched-centos7.tgz > /root/php-7.4-patched-centos7.tgz.sha256
 ```
 
 Na produkcji (krok 5P) biblioteki uruchomieniowe dla tego zestawu to:
 
 ```bash
-yum -y install openssl-libs zlib libcurl bzip2-libs readline libxml2
-ldd /opt/php-7.4-patched/sbin/php-fpm /opt/php-7.4-patched/bin/php | grep 'not found'   # musi być PUSTE
+yum -y install openssl-libs zlib libcurl bzip2-libs readline libxml2 ncurses-libs
+ldd /usr/lib64/httpd/modules/libphp74-patched.so /opt/php-7.4-patched/bin/php | grep 'not found'   # musi być PUSTE
 ```
 
 ---

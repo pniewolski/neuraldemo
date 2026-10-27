@@ -9,9 +9,9 @@ start_log "30-konfiguracja-php"
 [ -x "$PHP_PREFIX/bin/php" ] || die "Brak $PHP_PREFIX/bin/php – najpierw uruchom 10-build-test.sh lub 20-install-prod.sh"
 
 head1 "Źródłowy php.ini z PHP 7.2"
-SRC_INI=$(php --ini 2>/dev/null | sed -n 's/^Loaded Configuration File: *//p')
+SRC_INI=$(php --ini 2>/dev/null | sed -n 's/^Loaded Configuration File: *//p' || true)
 [ -n "$SRC_INI" ] && [ -f "$SRC_INI" ] || SRC_INI=/etc/php.ini
-[ -f "$SRC_INI" ] || die "Nie znaleziono php.ini dla PHP 7.2 (sprawdź 'php --ini')"
+[ -f "$SRC_INI" ] || die "Nie znaleziono php.ini dla PHP 7.2 (sprawdź 'php --ini'). Ustaw ścieżkę ręcznie."
 ok "Używam jako wzorca: $SRC_INI"
 
 DST_INI="$PHP_PREFIX/etc/php.ini"
@@ -67,4 +67,5 @@ fi
 
 head1 "Gotowe"
 log "Dalej: ./40-wlacz-php74.sh   (podmiana modułu w Apache + restart)"
+
 

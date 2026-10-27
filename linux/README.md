@@ -34,13 +34,36 @@ Alternatywnie z pliku patcha (położonego w `patches/`):
 
 ## Testy
 
+Smoke test obszarów zmienionych przez łatkę (sesja, upload multipart, zmienne żądania, alokator), przez Apache dla aktywnej wersji:
+
+```powershell
+docker exec centos7-php smoke-test.sh
+```
+
+Patch z gałęzi (commit `712e60f9ed` „Avoid state corruption via bailout”, GHSA-w8hw-w9fx-j79w / GHSA-6wmf-4rv5-p3rp) zapisany w `patches/`.
+
+Testy jednostkowe php-src:
+
 ```bash
 cd /usr/local/src/php-build-php-7.4-patched
 TEST_PHP_EXECUTABLE=/opt/php-7.4-patched/bin/php /opt/php-7.4-patched/bin/php run-tests.php -q <katalog/plik .phpt>
 ```
 
+## Wyniki (2026-10-23)
+
+| Test | 7.2.22 | 7.4 bez łatki (`/opt/php-7.4-vanilla`) | 7.4 z łatką |
+|---|---|---|---|
+| smoke-test.sh (Apache + fpm) | OK | – | OK |
+| php-src: Zend, session, basic, lang (3451) | – | 0 FAIL | 9 FAIL |
+| `max_multipart_body_parts` | brak | brak | działa (`test-multipart-limit.sh`) |
+
+Wszystkie 9 FAIL wynikają z zamierzonych zmian łatki:
+- 8× `ext/session/tests/rfc1867*` – łatka **wyłącza `session.upload_progress`** (`if (!PS(rfc1867_enabled) || true)`). Aplikacje korzystające z paska postępu uploadu przez sesję przestaną go dostawać.
+- 1× `tests/lang/bug45392` – inny format komunikatu „Allowed memory size exhausted” (dodatkowa pusta linia), kosmetyczne.
+
+Nowe ini: `max_multipart_body_parts` (domyślnie -1 = `max_input_vars` + `max_file_uploads`). Duplikaty i nieużywane nagłówki części multipart są ignorowane.
+
 ## Uwagi
 - 7.2 → 7.4 to zmiana wersji minor: sprawdzić aplikację (deprecated/usunięte funkcje, `ext/zip` wymaga libzip ≥ 0.11 – w buildzie 7.4 pominięte).
 - Kontener współdzieli kernel WSL2 – nie ma to znaczenia dla podatności w samym PHP.
 - Brak systemd w kontenerze; na produkcji php-fpm należy dodać jako unit systemd.
-

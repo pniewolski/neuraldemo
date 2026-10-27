@@ -84,8 +84,10 @@ catch_workers_output = yes
 php_admin_value[error_log] = $PREFIX/var/log/www-error.log
 EOF
 echo "$PORT" > "$PREFIX/.fpm-port"
+VER=$("$PREFIX/bin/php" -r 'echo PHP_VERSION;')
 echo "$VER"  > "$PREFIX/.php-version"
 
 echo "==> Zainstalowano PHP $VER w $PREFIX (php-fpm 127.0.0.1:$PORT)"
 "$PREFIX/bin/php" -v
+
 

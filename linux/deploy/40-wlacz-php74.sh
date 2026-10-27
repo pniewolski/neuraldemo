@@ -48,35 +48,70 @@ fi
 ok "Syntax OK"
 
 head1 "Restart Apache"
-warn "Używam 'systemctl restart' (pełny restart procesu)."
+warn "Używam pełnego restartu procesu (systemctl restart httpd)."
 warn "Przeładowanie (reload / graceful / httpd -k restart) przy podmianie mod_php powoduje segfaulty."
-if ! systemctl restart httpd; then
+if ! restart_httpd; then
   err "Restart nieudany – przywracam PHP 7.2"
   cp -a "$BK" "$MODCONF"
-  systemctl restart httpd || err "Nie udało się wystartować Apache! Sprawdź: journalctl -xe -u httpd"
+  restart_httpd || err "Nie udało się wystartować Apache! Sprawdź: journalctl -xe -u httpd"
   die "Przerwano. Logi: /var/log/httpd/error_log"
 fi
 sleep 2
-systemctl is-active --quiet httpd || { cp -a "$BK" "$MODCONF"; systemctl restart httpd; die "Apache nie działa – przywrócono PHP 7.2"; }
+if ! httpd_is_running; then
+  cp -a "$BK" "$MODCONF"
+  restart_httpd || true
+  die "Apache nie działa po restarcie – przywrócono PHP 7.2"
+fi
 ok "Apache uruchomiony"
 
 head1 "Szybkie sprawdzenie"
-VER=$(php_probe '<?php echo PHP_VERSION,"|",PHP_SAPI;')
-log "Odpowiedź serwera: ${VER:-(brak)}"
-case "$VER" in
-  7.4*) ok "Apache obsługuje żądania przez PHP $VER" ;;
-  "")   err "Brak odpowiedzi z $TEST_URL"
-        tail -15 /var/log/httpd/error_log
-        warn "Jeśli w logu są segfaulty lub strona nie działa, cofnij zmianę: ./90-rollback-php72.sh"
-        exit 1 ;;
-  *)    warn "Nieoczekiwana odpowiedź: $VER"; tail -10 /var/log/httpd/error_log ;;
-esac
+# Jeśli skonfigurowany adres nie działa, spróbuj znaleźć właściwy DocumentRoot
+auto_docroot >/dev/null 2>&1 || true
 
-grep -c 'Segmentation fault' /var/log/httpd/error_log >/dev/null 2>&1 && \
-  tail -200 /var/log/httpd/error_log | grep -q 'Segmentation fault' && \
-  warn "W logu są wpisy o segmentation fault – sprawdź /var/log/httpd/error_log"
+if VER=$(php_probe '<?php echo PHP_VERSION,"|",PHP_SAPI;'); then
+  log "Odpowiedź serwera: $VER"
+  case "$VER" in
+    7.4*) ok "Apache obsługuje żądania przez PHP $VER" ;;
+    *)    warn "Nieoczekiwana wersja: $VER"; tail -10 /var/log/httpd/error_log ;;
+  esac
+else
+  # brak odpowiedzi nie musi oznaczać awarii – sprawdzamy stan innymi metodami
+  warn "Nie udało się wykonać testowego żądania HTTP."
+  log ""
+
+  WERSJA_LOG=$(grep -o 'PHP/[0-9][^ ]*' /var/log/httpd/error_log 2>/dev/null | tail -1 || true)
+  if [ -n "$WERSJA_LOG" ]; then
+    case "$WERSJA_LOG" in
+      PHP/7.4*) ok "Log Apache potwierdza start z $WERSJA_LOG – podmiana modułu ZADZIAŁAŁA" ;;
+      *)        err "Log Apache pokazuje $WERSJA_LOG – podmiana mogła się nie udać" ;;
+    esac
+  fi
+  if grep -qa 'max_multipart_body_parts' "$MOD_DIR/$MOD_NAME" 2>/dev/null; then
+    ok "Zainstalowany moduł zawiera łatkę"
+  fi
+  if httpd_is_running; then ok "Apache działa"; else err "Apache NIE działa"; fi
+
+  log ""
+  log "Samo żądanie HTTP nie przeszło. Najczęstsza przyczyna to niewłaściwy TEST_URL/DOCROOT"
+  log "w config.sh albo brak lokalnego dostępu do serwera (zapora, vhost)."
+  log ""
+  log "Co zrobić:"
+  log "  1) ./99-diagnoza-http.sh   – wskaże, co dokładnie blokuje połączenie"
+  log "  2) ./60-czy-podatny.sh     – potwierdzi stan serwera bez użycia HTTP"
+  log "  3) sprawdź stronę w przeglądarce"
+  log ""
+  log "Gdyby aplikacja nie działała: ./90-rollback-php72.sh"
+  diagnoza_probe
+  exit 1
+fi
+
+if tail -200 /var/log/httpd/error_log 2>/dev/null | grep -q 'Segmentation fault'; then
+  warn "W logu Apache są wpisy o segmentation fault – sprawdź /var/log/httpd/error_log"
+fi
 
 head1 "Gotowe"
 log "Dalej: ./50-weryfikacja.sh"
 log "Powrót do PHP 7.2 w razie problemów: ./90-rollback-php72.sh"
+
+
 

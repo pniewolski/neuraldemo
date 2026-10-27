@@ -12,17 +12,40 @@
   Galaz docelowa. Domyslnie php74-cve-2026-109618-109619 (nowa galaz, do merge requesta).
   Podaj 'main' albo 'master', aby wrzucic bezposrednio na galaz glowna.
 
+.PARAMETER Token
+  Personal Access Token GitLaba (scope write_repository). Wymusza dostep przez HTTPS.
+  Bez tego parametru skrypt uzywa SSH. Token NIE jest zapisywany w konfiguracji repo.
+
 .PARAMETER Force
   Nadpisuje katalog w repozytorium, jesli juz istnieje.
+
+.EXAMPLE
+  .\wgraj.ps1 -Token glpat-xxxxxxxxxxxx
+
+.EXAMPLE
+  .\wgraj.ps1                      # przez SSH
 #>
 param(
     [string]$Branch = "php74-cve-2026-109618-109619",
+    [string]$Token  = "",
     [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
 
-$RepoUrl  = "git@git.mccomp.pl:devops/tools/hoss2-dev-environment.git"
+# Tryb dostepu: HTTPS z tokenem albo SSH
+$SshUrl   = "git@git.mccomp.pl:devops/tools/hoss2-dev-environment.git"
+$CleanHttps = "https://git.mccomp.pl/devops/tools/hoss2-dev-environment.git"
+if ($Token) {
+    # oauth2:<token> to standardowy sposob uwierzytelniania PAT w GitLabie przez HTTPS
+    $AuthUrl = "https://oauth2:$Token@git.mccomp.pl/devops/tools/hoss2-dev-environment.git"
+    $RepoUrl = $AuthUrl        # uzywany do clone/fetch/push
+    $TrybDostepu = "HTTPS (token)"
+} else {
+    $AuthUrl = $SshUrl
+    $RepoUrl = $SshUrl
+    $TrybDostepu = "SSH"
+}
 $WorkDir  = "C:\p\PhpstormProjects\hoss2-dev-environment"
 $Source   = "C:\p\PhpstormProjects\_hoss2-upload\php74-cve-2026-109618-109619"
 $DirName  = "php74-cve-2026-109618-109619"
@@ -38,19 +61,19 @@ if (-not (Test-Path $Source)) { Stop-Blad "Brak katalogu zrodlowego: $Source" }
 $liczbaSh = (Get-ChildItem "$Source\*.sh").Count
 Ok "Znaleziono $liczbaSh skryptow w $Source"
 
-Krok "Sprawdzenie dostepu do repozytorium"
-# BatchMode, zeby nie czekac na haslo w nieskonczonosc
-$null = & ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T git@git.mccomp.pl 2>&1
-# GitLab zwraca kod 1 nawet przy poprawnym logowaniu, wiec sprawdzamy inaczej
+Krok "Sprawdzenie dostepu do repozytorium ($TrybDostepu)"
 $test = & git ls-remote $RepoUrl HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Host $test -ForegroundColor Red
+    # nie pokazuj tokenu w komunikacie bledu
+    Write-Host ($test -replace [regex]::Escape($Token), "***") -ForegroundColor Red
     Write-Host ""
     Uwaga "Brak dostepu do repozytorium."
-    Write-Host "Dodaj ten klucz publiczny w GitLabie (Preferences -> SSH Keys):"
-    Write-Host ""
-    Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub"
-    Write-Host ""
+    if ($Token) {
+        Write-Host "Sprawdz, czy token ma scope 'write_repository' i nie wygasl."
+    } else {
+        Write-Host "Dodaj klucz SSH w GitLabie albo uruchom z tokenem:"
+        Write-Host "   .\wgraj.ps1 -Token glpat-xxxxxxxxxxxx"
+    }
     Write-Host "Szczegoly: C:\p\PhpstormProjects\_hoss2-upload\INSTRUKCJA.md"
     exit 1
 }
@@ -61,13 +84,20 @@ Krok "Przygotowanie kopii roboczej"
 if (Test-Path "$WorkDir\.git") {
     Ok "Repozytorium juz sklonowane: $WorkDir"
     Push-Location $WorkDir
-    & git fetch --all --prune
+    & git fetch $RepoUrl --prune 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { Pop-Location; Stop-Blad "git fetch nie powiodl sie" }
     Pop-Location
 } else {
     if (Test-Path $WorkDir) { Stop-Blad "$WorkDir istnieje, ale nie jest repozytorium git. Usun go recznie." }
     & git clone $RepoUrl $WorkDir
     if ($LASTEXITCODE -ne 0) { Stop-Blad "git clone nie powiodl sie" }
+    # po sklonowaniu ustaw czysty URL bez tokenu, zeby token nie zostal w .git/config
+    if ($Token) {
+        Push-Location $WorkDir
+        & git remote set-url origin $CleanHttps
+        Pop-Location
+    }
+
     Ok "Sklonowano do $WorkDir"
 }
 
@@ -179,8 +209,11 @@ Dokumentacja:  $DirName/README.md
     Ok "Commit utworzony"
 
     Krok "Push"
-    & git push -u origin $Branch
+    # przy HTTPS pushujemy przez URL z tokenem (remote 'origin' jest czysty, bez tokenu)
+    & git push -u $AuthUrl "${Branch}:${Branch}"
     if ($LASTEXITCODE -ne 0) { Stop-Blad "git push nie powiodl sie" }
+    # upewnij sie, ze galaz sledzi origin, a nie URL z tokenem
+    & git branch --set-upstream-to=origin/$Branch $Branch 2>&1 | Out-Null
     Ok "Wyslano na origin/$Branch"
 
     Write-Host ""
@@ -192,4 +225,6 @@ Dokumentacja:  $DirName/README.md
 finally {
     Pop-Location
 }
+
+
 

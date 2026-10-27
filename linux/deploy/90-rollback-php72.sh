@@ -31,6 +31,7 @@ else
   confirm "Przywrócić PHP 7.2 i zrestartować Apache?"
   sed -i "s|modules/$MOD_NAME|modules/libphp7.so|" "$MODCONF"
 fi
+grep -q 'modules/libphp7\.so' "$MODCONF" || die "W $MODCONF nadal nie ma modules/libphp7.so – popraw plik ręcznie"
 sed 's/^/  /' "$MODCONF"
 
 head1 "Test składni"
@@ -38,19 +39,23 @@ httpd -t || die "httpd -t zgłosił błąd – popraw $MODCONF ręcznie przed re
 ok "Syntax OK"
 
 head1 "Restart Apache"
-systemctl restart httpd || die "Restart nieudany – sprawdź: journalctl -xe -u httpd"
+restart_httpd || die "Restart nieudany – sprawdź: journalctl -xe -u httpd"
 sleep 2
-systemctl is-active --quiet httpd || die "Apache nie działa – sprawdź /var/log/httpd/error_log"
+httpd_is_running || die "Apache nie działa – sprawdź /var/log/httpd/error_log"
 ok "Apache uruchomiony"
 
 head1 "Sprawdzenie"
-VER=$(php_probe '<?php echo PHP_VERSION,"|",PHP_SAPI;')
-log "Odpowiedź serwera: ${VER:-(brak)}"
-case "$VER" in
-  7.2*) ok "Przywrócono PHP $VER" ;;
-  "")   err "Brak odpowiedzi z $TEST_URL"; tail -15 /var/log/httpd/error_log; exit 1 ;;
-  *)    warn "Nieoczekiwana odpowiedź: $VER" ;;
-esac
+if VER=$(php_probe '<?php echo PHP_VERSION,"|",PHP_SAPI;'); then
+  log "Odpowiedź serwera: $VER"
+  case "$VER" in
+    7.2*) ok "Przywrócono PHP $VER" ;;
+    *)    warn "Nieoczekiwana wersja: $VER" ;;
+  esac
+else
+  diagnoza_probe
+  tail -15 /var/log/httpd/error_log | sed 's/^/  /'
+  exit 1
+fi
 
 head1 "Opcjonalne sprzątanie"
 log "PHP 7.4 pozostaje zainstalowane i gotowe do ponownego włączenia (./40-wlacz-php74.sh)."
@@ -60,4 +65,5 @@ if [ -L /usr/local/bin/php ]; then
   warn "Istnieje dowiązanie /usr/local/bin/php -> $(readlink -f /usr/local/bin/php)"
   log  "Jeśli wskazuje na PHP 7.4, usuń je: rm -f /usr/local/bin/php"
 fi
+
 
