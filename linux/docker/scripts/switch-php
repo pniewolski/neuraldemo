@@ -1,0 +1,33 @@
+#!/bin/bash
+# Przełącza wersję PHP obsługiwaną przez Apache.
+#   switch-php            -> lista wersji i aktywna
+#   switch-php 72         -> /opt/php-7.2.22
+#   switch-php 74         -> /opt/php-7.4-patched
+#   switch-php /opt/php-X -> dowolny prefix
+set -e
+declare -A ALIAS=([72]=/opt/php-7.2.22 [74]=/opt/php-7.4-patched)
+ACTIVE=$(cat /etc/httpd/php-active-port)
+
+if [ -z "${1:-}" ]; then
+  for p in /opt/php-*; do
+    [ -f "$p/.fpm-port" ] || continue
+    port=$(cat "$p/.fpm-port"); mark=" "; [ "$port" = "$ACTIVE" ] && mark="*"
+    echo "$mark $p  PHP $(cat "$p/.php-version")  fpm:$port"
+  done
+  exit 0
+fi
+
+P="${ALIAS[$1]:-$1}"
+[ -f "$P/.fpm-port" ] || { echo "Brak zainstalowanego PHP w $P"; exit 1; }
+PORT=$(cat "$P/.fpm-port")
+
+# upewnij się, że php-fpm działa
+if ! { [ -f "$P/var/run/php-fpm.pid" ] && kill -0 "$(cat "$P/var/run/php-fpm.pid")" 2>/dev/null; }; then
+  "$P/sbin/php-fpm" -y "$P/etc/php-fpm.conf"
+fi
+
+echo "$PORT" > /etc/httpd/php-active-port
+sed -i "s|proxy:fcgi://127.0.0.1:[0-9]*|proxy:fcgi://127.0.0.1:$PORT|" /etc/httpd/conf.d/php-fpm.conf
+/usr/sbin/httpd -t && /usr/sbin/httpd -k graceful
+echo "Apache przełączony na PHP $(cat "$P/.php-version") ($P, fpm:$PORT)"
+
